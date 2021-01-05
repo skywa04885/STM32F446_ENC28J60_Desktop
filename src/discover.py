@@ -1,7 +1,8 @@
 import gi
 import socket
 import time
-from struct import * 
+from struct import pack, unpack
+from .connecting import ConnectingWindow
 
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, GLib
@@ -62,10 +63,23 @@ class DiscoverWindow(Gtk.Window):
         # Content
         #
 
+        # Creates the main VBOX
+        self.vbox_main = Gtk.Box(orientation = Gtk.Orientation.VERTICAL)
+        self.add(self.vbox_main)
+
         # Creates the list box
         self.mcu_list_box = Gtk.ListBox()
         self.mcu_list_box.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        self.add(self.mcu_list_box)
+        self.vbox_main.add(self.mcu_list_box)
+
+        # Creates the connect button
+        self.button_connect = Gtk.Button(label = 'Verbind')
+        self.button_connect.set_margin_bottom(10)
+        self.button_connect.set_margin_left(10)
+        self.button_connect.set_margin_right(10)
+        self.button_connect.set_margin_top(10)
+        self.button_connect.connect('pressed', self.on_button_connect_pressed)
+        self.vbox_main.pack_end(self.button_connect, False, False, 0)
 
         #
         # Creates the UDP Server
@@ -76,6 +90,17 @@ class DiscoverWindow(Gtk.Window):
         self.broadcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, True)
         self.broadcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, True)
         self.broadcast_socket.bind(('0.0.0.0', DISCOVER_PORT))
+
+        # Starts discovering
+        self.on_refresh_button_pressed(None)
+
+    def on_button_connect_pressed(self, widget):
+        if len(self.mcu_list_box.get_selected_rows()) > 0:
+            connecting_window = ConnectingWindow(self.mcu_list_box.get_selected_rows()[0].ip)
+            connecting_window.show_all()
+
+            self.broadcast_socket.close()
+            self.destroy()
     
     def on_discover_packet(self, source, cbcond):
         # Reads the packet which is now available, and checks if it is not
@@ -83,16 +108,18 @@ class DiscoverWindow(Gtk.Window):
         data, _, _, address = self.broadcast_socket.recvmsg(1024)
         if address[0] == socket.gethostbyname(socket.gethostname()):
             return True
-
-        # Prints to the console that packet has been received
-        print(f'{time.time()} MCU ontdekt op: {address[0]}:{address[1]}')
-
         # Parses the response packet
-        _, _, _, _, vstrl = unpack('BBBBB', data[0:5]);
+        _, _, _, op, vstrl = unpack('BBBBB', data[0:5]);
         vstr = (f'{vstrl}c', data[5:])
 
+        if op == DISCOVER_OPCODE_REQUEST:
+            return True
+        
+        # Prints to the console that packet has been received
+        print(f'{time.time()} MCU ontdekt op: {address[0]}:{address[1]}, vendor string: {vstrl}->{vstr[1].decode("utf-8")}')
+
         # Adds the device to the device list
-        self.mcu_list_box.insert(DiscoverWindowMCUElement(f'{address[0]}:{address[1]}', vstr[1].decode('utf-8')), 0)
+        self.mcu_list_box.insert(DiscoverWindowMCUElement(address[0], vstr[1].decode('utf-8')), 0)
         self.mcu_list_box.show_all()
 
         # Parses the packet
