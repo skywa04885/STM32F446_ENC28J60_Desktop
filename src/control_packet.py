@@ -1,9 +1,12 @@
 import enum
+from struct import unpack
 
-CONTROL_PORT = 7513
+CONTROL_PORT = 7588
 
 CONTROL_PACKET_FLAG_ERR = 0
 CONTROL_PACKET_FLAG_OK = 1
+
+CONTROL_PREFIX = b'pointytits'
 
 class ControlPacketMotorMode(enum.Enum):
     Auto = 0
@@ -21,6 +24,9 @@ class ControlPacketType(enum.Enum):
 class ControlPacketOpcode(enum.Enum):
     MotorInfo = 0
     StepperMove = 1
+    StepperEnable = 2
+    StepperDisable = 3
+    StepperStats = 4
 
 class ControlPacketArgType(enum.Enum):
     Padd = 0
@@ -36,3 +42,16 @@ class ControlPacketArgType(enum.Enum):
     I64 = 10
     MotorStatus = 11
     End = 0xFFFF
+
+class ControlPacketArgStepperStatus:
+    def __init__ (self, id_, flags, sps, cpos, tpos):
+        self.id_ = id_
+        self.flags = flags
+        self.sps = sps
+        self.cpos = cpos
+        self.tpos = tpos
+
+    def parse(buffer):
+        id_, f, sps, cpos, tpos = unpack('<BBHii', buffer)
+        return ControlPacketArgStepperStatus(id_, f, sps, cpos, tpos)
+

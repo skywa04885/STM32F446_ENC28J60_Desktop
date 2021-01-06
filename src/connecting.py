@@ -2,13 +2,11 @@ import gi
 import socket
 import time
 from struct import pack, unpack
-from .control_packet import ControlPacketArgType, ControlPacketOpcode, ControlPacketType, CONTROL_PORT, ControlPacketMotorType, ControlPacketMotorMode
+from .control_packet import ControlPacketArgType, ControlPacketOpcode, ControlPacketType, CONTROL_PORT, CONTROL_PREFIX, ControlPacketMotorType, ControlPacketMotorMode
 from .control import ControlWindowMotor, ControlWindow
 
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, GLib
-
-CONTROL_PORT = 7513
 
 control_packet_motor_type_switcher = {
     0: ControlPacketMotorType.Stepper,
@@ -60,18 +58,20 @@ class ConnectingWindow(Gtk.Window):
 
         # Unpacks the data, and checks if the current packet
         #  meets our requirements
-        t_op, f, sn, tl = unpack('<BBIH', data[:8])
-        if (t_op & 1) != ControlPacketType.Reply.value or ((t_op & 0b01111111) >> 1) != ControlPacketOpcode.MotorInfo.value:
+        prefix, t_op, f, sn, tl = unpack('<10sBBIH', data[:18])
+        if prefix != CONTROL_PREFIX:
+            return True
+        elif (t_op & 1) != ControlPacketType.Reply.value or ((t_op & 0b01111111) >> 1) != ControlPacketOpcode.MotorInfo.value:
             return True
 
         # Loops over the arguments, and parses them
         motors = []
-        start = 8
+        start = 18
         while True:
             arg_type, arg_len = unpack('<HH', data[start:start + 4])
 
             # Checks the argument type, and parses it accordingly
-            if arg_type == ControlPacketArgType.MotorStatus.value:
+            if arg_type == ControlPacketArgType.Motor.value:
                 id_, t, m, min_sps, max_sps = unpack('<BBBHH', data[start + 4:start + 4 + arg_len])
                 motors.append(ControlWindowMotor(control_packet_motor_type_switcher.get(t), 
                     id_, cotnrol_packet_motor_mode_switcher.get(m), min_sps, max_sps))
@@ -86,13 +86,19 @@ class ConnectingWindow(Gtk.Window):
         control_window.connect('destroy', Gtk.main_quit)
         control_window.show_all()
 
+        if self.io_watcher != None:
+            GLib.source_remove(self.io_watcher)
+            self.io_watcher = None
+
         self.udp_socket.close()
         self.destroy()
         
         return True
 
     def on_close_timeout(self):
-        GLib.source_remove(self.io_watcher)
+        if self.io_watcher != None:
+            GLib.source_remove(self.io_watcher)
+            self.io_watcher = None
 
         self.progress_bar.set_text('Verbinding mislukt !')
         self.progress_bar.set_fraction(1.0)
@@ -105,7 +111,7 @@ class ConnectingWindow(Gtk.Window):
         self.progress_bar.set_fraction(0.1)
 
         # Sends the communication start packet
-        data = pack('<BBIHs', (ControlPacketType.Request.value | (ControlPacketOpcode.MotorInfo.value << 1)), 0, 1, 0, b'')
+        data = pack('<10sBBIHs', CONTROL_PREFIX, (ControlPacketType.Request.value | (ControlPacketOpcode.MotorInfo.value << 1)), 0, 1, 0, b'')
         self.udp_socket.sendto(data, (self.ip, CONTROL_PORT))
 
         # Sets the timeout, which will close the window if response

@@ -96,10 +96,13 @@ class DiscoverWindow(Gtk.Window):
 
     def on_button_connect_pressed(self, widget):
         if len(self.mcu_list_box.get_selected_rows()) > 0:
+            GLib.source_remove(self.io_watcher)
+            self.io_watcher = None
+            self.broadcast_socket.close()
+
             connecting_window = ConnectingWindow(self.mcu_list_box.get_selected_rows()[0].ip)
             connecting_window.show_all()
 
-            self.broadcast_socket.close()
             self.destroy()
     
     def on_discover_packet(self, source, cbcond):
@@ -109,7 +112,7 @@ class DiscoverWindow(Gtk.Window):
         if address[0] == socket.gethostbyname(socket.gethostname()):
             return True
         # Parses the response packet
-        _, _, _, op, vstrl = unpack('BBBBB', data[0:5]);
+        _, _, _, op, vstrl = unpack('<BBBBB', data[0:5])
         vstr = (f'{vstrl}c', data[5:])
 
         if op == DISCOVER_OPCODE_REQUEST:
@@ -138,10 +141,11 @@ class DiscoverWindow(Gtk.Window):
         #  and create a new one
         if self.io_watcher != None:
             GLib.source_remove(self.io_watcher)
+            self.io_watcher = None
         self.io_watcher = GLib.io_add_watch(self.broadcast_socket.fileno(), GLib.IO_IN, self.on_discover_packet)
 
         # Sends the broadcast packet
-        pdata = pack('BBBBBs', DISCOVER_PREFIX[0], DISCOVER_PREFIX[1], DISCOVER_PREFIX[2], DISCOVER_OPCODE_REQUEST, 0, b'')
+        pdata = pack('<BBBBBs', DISCOVER_PREFIX[0], DISCOVER_PREFIX[1], DISCOVER_PREFIX[2], DISCOVER_OPCODE_REQUEST, 0, b'')
         self.broadcast_socket.sendto(pdata, ('255.255.255.255', DISCOVER_PORT))
 
         # Checks if an current event needs to be stopped, and create
